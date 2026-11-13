@@ -651,7 +651,7 @@
       </div>
 
       <div id="t1-pool-box" style="display:none; margin-bottom:6px; flex-shrink:0;">
-        <label style="font-size:0.64rem; color:var(--text-muted);">Tap to add from earlier matches:</label>
+        <label style="font-size:0.64rem; color:var(--text-muted);">Unassigned session players:</label>
         <div id="t1-pool-chips" class="pool-chips"></div>
       </div>
 
@@ -683,7 +683,7 @@
       </div>
 
       <div id="t2-pool-box" style="display:none; margin-bottom:6px; flex-shrink:0;">
-        <label style="font-size:0.64rem; color:var(--text-muted);">Tap to add from earlier matches:</label>
+        <label style="font-size:0.64rem; color:var(--text-muted);">Unassigned session players:</label>
         <div id="t2-pool-chips" class="pool-chips"></div>
       </div>
 
@@ -900,7 +900,7 @@
         </p>
         <div style="display:grid; gap:6px;">
           <button class="btn btn-block" id="btn-start-next-match" disabled onclick="startNextMatchKeepStats()">
-            ➕ Start a New Match (Keep Stats)
+            ➕ Start a New Match (Keep Teams & Stats)
           </button>
           <button class="btn btn-solid btn-block" id="btn-finish-session" disabled onclick="finishTournamentSession()">
             🏆 Finish the Session (Awards)
@@ -1133,7 +1133,7 @@
 
 <script>
 /* ============================================================================
-   WIZARD STATE, EMPTY DEFAULT ROSTERS & MULTI-MATCH SESSION STORAGE
+   WIZARD STATE, EMPTY INITIAL ROSTERS & MULTI-MATCH SESSION STORAGE
    ============================================================================ */
 let wizardConfig = {
   oversPerInnings: 6,
@@ -1171,7 +1171,7 @@ function updateStep1SessionBanner() {
     banner.style.display = 'block';
     banner.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
-        <span><strong>Session:</strong> ${sessionHistory.length} match${sessionHistory.length === 1 ? '' : 'es'} saved.</span>
+        <span><strong>Session:</strong> ${sessionHistory.length} match${sessionHistory.length === 1 ? '' : 'es'} saved. Teams kept!</span>
         <button class="btn btn-sm btn-solid" onclick="finishTournamentSession()">Finish Session</button>
       </div>
     `;
@@ -1242,7 +1242,8 @@ function renderTeamBuilder(teamKey) {
       row.innerHTML = `
         <span class="player-num">${idx + 1}.</span>
         <input type="text" value="${name}" oninput="renameRosterPlayer('${teamKey}', ${idx}, this.value)">
-        <button class="btn btn-sm" onclick="removeRosterPlayer('${teamKey}', ${idx})">✕</button>
+        <button class="btn btn-sm" title="Swap to other team" onclick="swapPlayerAcrossTeams('${teamKey}', ${idx})">⇄</button>
+        <button class="btn btn-sm" title="Remove player" onclick="removeRosterPlayer('${teamKey}', ${idx})">✕</button>
       `;
       container.appendChild(row);
     });
@@ -1274,6 +1275,23 @@ function registerKnownPlayer(name) {
   if (!knownSessionPlayers.some(p => p.toLowerCase() === clean.toLowerCase())) {
     knownSessionPlayers.push(clean);
   }
+}
+
+function swapPlayerAcrossTeams(fromTeamKey, idx) {
+  const isT1 = fromTeamKey === 'team1';
+  const srcList = isT1 ? wizardConfig.team1Roster : wizardConfig.team2Roster;
+  const destList = isT1 ? wizardConfig.team2Roster : wizardConfig.team1Roster;
+  const errEl = document.getElementById(isT1 ? 'step2-t1-error' : 'step2-t2-error');
+  errEl.style.display = 'none';
+
+  if (destList.length >= 15) {
+    errEl.textContent = `Other team already has the maximum 15 players.`;
+    errEl.style.display = 'block';
+    return;
+  }
+  const [movedPlayer] = srcList.splice(idx, 1);
+  if (movedPlayer) destList.push(movedPlayer);
+  renderTeamBuilder(fromTeamKey);
 }
 
 function quickAddFromPool(teamKey, playerName) {
@@ -1354,6 +1372,10 @@ function goToStep3Toss() {
     errEl.textContent = 'Add at least 2 players to Team 2.';
     errEl.style.display = 'block';
     return;
+  }
+  // If toss was already flipped earlier for this match setup, refresh opener dropdowns with latest rosters
+  if (wizardConfig.tossWinner) {
+    populateInitialOpenersDropdowns();
   }
   showScreen('screen-step3-toss', `Match #${sessionHistory.length + 1} • Step 3/4`);
 }
@@ -2144,16 +2166,26 @@ function archiveCurrentMatchIfCompleted() {
 
 function startNextMatchKeepStats() {
   archiveCurrentMatchIfCompleted();
+
+  // Keep Team 1 and Team 2 rosters pre-filled from the match that just finished
+  if (matchState && matchState.teams) {
+    wizardConfig.team1Roster = matchState.teams.team1.players.map(p => p.name);
+    wizardConfig.team2Roster = matchState.teams.team2.players.map(p => p.name);
+  } else if (sessionHistory.length > 0) {
+    const lastMatch = sessionHistory[sessionHistory.length - 1];
+    wizardConfig.team1Roster = lastMatch.teams.team1.players.map(p => p.name);
+    wizardConfig.team2Roster = lastMatch.teams.team2.players.map(p => p.name);
+  }
+
   matchState = null;
   undoStack = [];
   wizardConfig.tossOutcome = null;
   wizardConfig.tossWinner = null;
-  wizardConfig.team1Roster = [];
-  wizardConfig.team2Roster = [];
 
   document.getElementById('toss-decision-box').style.display = 'none';
   document.getElementById('openers-selection-card').style.display = 'none';
   document.getElementById('btn-launch-match').disabled = true;
+  document.getElementById('btn-flip-coin').textContent = 'Flip Coin';
   document.getElementById('toss-coin').textContent = 'FLIP';
   document.getElementById('toss-status-text').textContent = 'Tap button to flip coin';
 
@@ -2169,7 +2201,7 @@ function finishTournamentSession() {
 }
 
 function wipeEntireSessionAndRestart() {
-  if (confirm('Start a brand new session? This clears all saved matches and rankings.')) {
+  if (confirm('Start a brand new session? This clears all saved matches, teams, and rankings.')) {
     sessionHistory = [];
     knownSessionPlayers = [];
     matchState = null;
@@ -2182,6 +2214,7 @@ function wipeEntireSessionAndRestart() {
     document.getElementById('toss-decision-box').style.display = 'none';
     document.getElementById('openers-selection-card').style.display = 'none';
     document.getElementById('btn-launch-match').disabled = true;
+    document.getElementById('btn-flip-coin').textContent = 'Flip Coin';
     document.getElementById('toss-coin').textContent = 'FLIP';
     document.getElementById('toss-status-text').textContent = 'Tap button to flip coin';
 
@@ -2597,7 +2630,7 @@ function renderMatchSummarySubView() {
   document.getElementById('btn-start-next-match').disabled = !isDone;
   document.getElementById('btn-finish-session').disabled = !isDone && sessionHistory.length === 0;
   document.getElementById('post-match-helper-text').textContent = isDone
-    ? `Match #${matchState.matchNumber} complete. Start the next match (keeping all session stats) or finish the session.`
+    ? `Match #${matchState.matchNumber} complete. Start the next match (keeping both teams & all session stats) or finish the session.`
     : `Finish Match #${matchState.matchNumber} to unlock starting the next match.`;
 }
 
